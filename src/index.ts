@@ -196,6 +196,282 @@ function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
+function renderHomePage(): Response {
+  const html = `<!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Explorer</title>
+    <style>
+      :root {
+        --bg: #0b1021;
+        --card: #101735;
+        --accent: #7b6cff;
+        --text: #f8fbff;
+        --muted: #b7c4e4;
+        --border: #2a335a;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        background: radial-gradient(circle at 20% 20%, #16224d, #0b1021 40%),
+                    radial-gradient(circle at 80% 0%, #271e5a, transparent 35%),
+                    var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      header {
+        padding: 48px 24px 16px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      h1 { margin: 0 0 12px; font-size: 36px; letter-spacing: -0.02em; }
+      p.lead { margin: 0; color: var(--muted); font-size: 17px; max-width: 720px; }
+
+      main { max-width: 1200px; margin: 0 auto; padding: 0 24px 64px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 20px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      .card h2 { margin: 0 0 10px; font-size: 20px; }
+      .card p { margin: 0 0 16px; color: var(--muted); }
+
+      label { display: block; margin-bottom: 6px; font-weight: 600; }
+      input, select, button, textarea {
+        font: inherit;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0d132a;
+        color: var(--text);
+        margin-bottom: 12px;
+      }
+
+      button {
+        background: linear-gradient(135deg, #9c7bff, #5c6cff);
+        color: white;
+        border: none;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 120ms ease, box-shadow 120ms ease;
+        box-shadow: 0 10px 30px rgba(124, 111, 255, 0.35);
+      }
+      button:hover { transform: translateY(-1px); box-shadow: 0 12px 40px rgba(124, 111, 255, 0.45); }
+      button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+
+      .results { margin-top: 12px; }
+      .progression-item, .melody-item {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .progression-item h3 { margin: 0 0 6px; font-size: 16px; }
+      .muted { color: var(--muted); }
+      code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; }
+
+      .api-hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px dashed var(--border);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 640px) {
+        h1 { font-size: 28px; }
+        header { padding-top: 32px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Music Explorer</h1>
+      <p class="lead">Generate chord progressions and quick melodies powered by the Music Helper worker. Tweak the key, choose a scale, and listen for inspiration.</p>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Chord Progressions</h2>
+        <p>Pick a key and scale to discover common progressions with built-in triads.</p>
+        <form id="progression-form">
+          <label for="progression-key">Key</label>
+          <input id="progression-key" name="key" value="C" placeholder="C, G, Bb" />
+
+          <label for="progression-scale">Scale</label>
+          <select id="progression-scale" name="scale">
+            <option value="major" selected>Major</option>
+            <option value="minor">Minor</option>
+          </select>
+
+          <button type="submit">Get Progressions</button>
+        </form>
+        <div id="progression-results" class="results muted">Results will appear here.</div>
+      </section>
+
+      <section class="card">
+        <h2>Melody Generator</h2>
+        <p>Send any chord list to get a simple melody that sits on top.</p>
+        <form id="melody-form">
+          <label for="melody-key">Key</label>
+          <input id="melody-key" name="key" value="C" />
+
+          <label for="melody-scale">Scale</label>
+          <select id="melody-scale" name="scale">
+            <option value="major" selected>Major</option>
+            <option value="minor">Minor</option>
+          </select>
+
+          <label for="melody-progression">Progression (comma separated)</label>
+          <input id="melody-progression" name="progression" value="C,G,Am,F" />
+
+          <button type="submit">Generate Melody</button>
+        </form>
+        <div class="muted" style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" data-progression="C,G,Am,F" class="progression-fill">Pop I–V–vi–IV</button>
+          <button type="button" data-progression="Am,F,C,G" class="progression-fill">vi–IV–I–V</button>
+          <button type="button" data-progression="Dm,G,C,F" class="progression-fill">ii–V–I–IV</button>
+        </div>
+        <div id="melody-results" class="results muted">Melody notes will appear here.</div>
+      </section>
+
+      <section class="card" style="grid-column: 1 / -1;">
+        <h2>API quick reference</h2>
+        <p class="muted">Prefer JSON? You can still call the worker directly.</p>
+        <div class="api-hint">
+          <div>
+            <div><strong>Progressions:</strong> <code>/api/progressions?key=C&scale=major</code></div>
+            <div><strong>Melody:</strong> POST <code>/api/melody</code> with <code>{"key":"C","scale":"major","progression":["C","G","Am","F"]}</code></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const progressionForm = document.getElementById('progression-form');
+      const melodyForm = document.getElementById('melody-form');
+      const progressionResults = document.getElementById('progression-results');
+      const melodyResults = document.getElementById('melody-results');
+
+      const setLoading = (el, isLoading) => {
+        if (!el) return;
+        if (isLoading) {
+          el.innerHTML = '<span class="muted">Loading...</span>';
+        }
+      };
+
+      progressionForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const keyInput = document.getElementById('progression-key');
+        const scaleSelect = document.getElementById('progression-scale');
+        const key = keyInput && 'value' in keyInput ? keyInput.value : 'C';
+        const scale = scaleSelect && 'value' in scaleSelect ? scaleSelect.value : 'major';
+
+        setLoading(progressionResults, true);
+
+        try {
+          const res = await fetch('/api/progressions?key=' + encodeURIComponent(key) + '&scale=' + encodeURIComponent(scale));
+          const data = await res.json();
+
+          if (!data.progressions) {
+            progressionResults.innerHTML = '<span class="muted">No progressions found.</span>';
+            return;
+          }
+
+          const items = data.progressions.map((p) => {
+            const chordNames = p.chords.map((c) => c.name).join(' · ');
+            const degrees = p.degrees.join(' - ');
+            return '<div class="progression-item">'
+              + '<h3>' + p.label + '</h3>'
+              + '<div class="muted">Degrees: ' + degrees + '</div>'
+              + '<div><strong>Chords:</strong> ' + chordNames + '</div>'
+              + '</div>';
+          }).join('');
+
+          progressionResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Key: ' + data.key + ' · Scale: ' + data.scaleType + '</div>' + items;
+        } catch (err) {
+          progressionResults.innerHTML = '<span class="muted">Something went wrong loading progressions.</span>';
+        }
+      });
+
+      melodyForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const keyInput = document.getElementById('melody-key');
+        const scaleSelect = document.getElementById('melody-scale');
+        const progressionField = document.getElementById('melody-progression');
+        const key = keyInput && 'value' in keyInput ? keyInput.value : 'C';
+        const scale = scaleSelect && 'value' in scaleSelect ? scaleSelect.value : 'major';
+        const progressionInput = progressionField && 'value' in progressionField ? progressionField.value : '';
+        const progression = progressionInput.split(',').map((p) => p.trim()).filter(Boolean);
+
+        setLoading(melodyResults, true);
+
+        try {
+          const res = await fetch('/api/melody', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ key, scale, progression })
+          });
+          const data = await res.json();
+
+          if (!data.melody) {
+            melodyResults.innerHTML = '<span class="muted">No melody returned.</span>';
+            return;
+          }
+
+          const items = data.melody.map((n) => '<div class="melody-item">'
+              + '<strong>' + n.note + '</strong> — ' + n.duration + ' beat' + (n.duration !== 1 ? 's' : '') + ' at beat ' + n.beat
+            + '</div>').join('');
+
+          melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + items;
+        } catch (err) {
+          melodyResults.innerHTML = '<span class="muted">Failed to load melody.</span>';
+        }
+      });
+
+      document.querySelectorAll('.progression-fill').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const value = btn.dataset.progression;
+          const input = document.getElementById('melody-progression');
+          if (value && input && 'value' in input) input.value = value;
+        });
+      });
+    </script>
+  </body>
+  </html>`;
+
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" }
+  });
+}
+
 // Worker entrypoint
 
 export default {
@@ -236,21 +512,7 @@ export default {
       }
 
       if (path === "/" && request.method === "GET") {
-        const info = {
-          message: "Music helper Worker",
-          endpoints: {
-            "/api/progressions?key=C&scale=major": "GET chord progression suggestions",
-            "/api/melody": {
-              method: "POST",
-              bodyExample: {
-                key: "C",
-                scale: "major",
-                progression: ["C", "G", "Am", "F"]
-              }
-            }
-          }
-        };
-        return jsonResponse(info);
+        return renderHomePage();
       }
 
       return new Response("Not found", { status: 404 });
