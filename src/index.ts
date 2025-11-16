@@ -517,6 +517,12 @@ function renderHomePage(): Response {
         <div id="melody-results" class="results muted">Melody notes will appear here.</div>
       </section>
 
+      <section class="card">
+        <h2>Guitar Fretboard</h2>
+        <p class="muted">Visualize where each melody note sits on the neck.</p>
+        <div id="fretboard-area" class="results muted">Play a melody to see fret positions.</div>
+      </section>
+
       <section class="card" style="grid-column: 1 / -1;">
         <h2>API quick reference</h2>
         <p class="muted">Prefer JSON? You can still call the worker directly.</p>
@@ -535,6 +541,7 @@ function renderHomePage(): Response {
       const melodyForm = document.getElementById('melody-form');
       const progressionResults = document.getElementById('progression-results');
       const melodyResults = document.getElementById('melody-results');
+      const fretboardArea = document.getElementById('fretboard-area');
       const progressionCapoInput = document.getElementById('progression-capo');
 
       const setLoading = (el, isLoading) => {
@@ -597,7 +604,6 @@ function renderHomePage(): Response {
         }).join('');
 
         return '<div class="tab-section">'
-          + '<h3>Guitar fretboard</h3>'
           + '<div class="fretboard">'
             + '<div class="fret-labels" style="grid-template-columns: repeat(' + (fretCount + 1) + ', 1fr);">' + fretLabels + '</div>'
             + rows
@@ -678,6 +684,7 @@ function renderHomePage(): Response {
         const progression = progressionInput.split(',').map((p) => p.trim()).filter(Boolean);
 
         setLoading(melodyResults, true);
+        setLoading(fretboardArea, true);
 
         try {
           const res = await fetch('/api/melody', {
@@ -700,9 +707,11 @@ function renderHomePage(): Response {
           const fretboard = buildFretboardDiagram(data.melody);
           const tabSteps = buildTabLegend(data.melody);
 
-          melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + fretboard + tabSteps + items;
+          melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + tabSteps + items;
+          fretboardArea.innerHTML = fretboard || '<span class="muted">No playable fretboard positions found.</span>';
         } catch (err) {
           melodyResults.innerHTML = '<span class="muted">Failed to load melody.</span>';
+          fretboardArea.innerHTML = '<span class="muted">Failed to load fretboard diagram.</span>';
         }
       });
 
