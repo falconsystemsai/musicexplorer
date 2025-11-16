@@ -27,6 +27,13 @@ type MelodyNote = {
   note: string;    // "E4"
   duration: number; // in beats (e.g. 0.5, 1, 2)
   beat: number;    // absolute beat position in the progression
+  tab: TabPosition;
+};
+
+type TabPosition = {
+  stringNumber: number; // 1 = high E, 6 = low E
+  fret: number;
+  label: string;
 };
 
 function normalizeKey(key: string): string {
@@ -97,9 +104,16 @@ const COMMON_PROGRESSIONS: ProgressionPattern[] = [
   { name: "I–IV–V–IV (Rock)", degrees: [1, 4, 5, 4] }
 ];
 
-function generateChordProgressions(key: string, scaleType: ScaleType) {
+function shiftNote(root: string, semitones: number): string {
+  const idx = getNoteIndex(root);
+  const offset = ((semitones % 12) + 12) % 12;
+  return CHROMATIC[(idx + offset) % 12];
+}
+
+function generateChordProgressions(key: string, scaleType: ScaleType, capo = 0) {
   const normalizedKey = normalizeKey(key);
-  const scale = buildScale(normalizedKey, scaleType);
+  const capoKey = shiftNote(normalizedKey, capo);
+  const scale = buildScale(capoKey, scaleType);
 
   const progressions = COMMON_PROGRESSIONS.map(pattern => {
     const chords = pattern.degrees.map(deg => buildChordTriad(scale, deg));
@@ -116,6 +130,8 @@ function generateChordProgressions(key: string, scaleType: ScaleType) {
 
   return {
     key: normalizedKey,
+    capo,
+    capoKey,
     scaleType,
     scale,
     progressions
@@ -124,6 +140,44 @@ function generateChordProgressions(key: string, scaleType: ScaleType) {
 
 // Melody generation
 // 1 bar of 4 beats per chord, quarter-note grid
+
+function noteNameToSemitone(note: string): number {
+  const match = note.match(/^([A-G]#?)(\d)$/);
+  if (!match) throw new Error(`Invalid note format: ${note}`);
+  const [, pitch, octaveStr] = match;
+  const octave = parseInt(octaveStr, 10);
+  return octave * 12 + getNoteIndex(pitch);
+}
+
+const STANDARD_TUNING = ["E2", "A2", "D3", "G3", "B3", "E4"]; // strings 6 -> 1
+
+function convertNoteToTab(note: string): TabPosition {
+  const targetSemitone = noteNameToSemitone(note);
+
+  const positions = STANDARD_TUNING.map((open, idx) => {
+    const openSemitone = noteNameToSemitone(open);
+    return {
+      stringNumber: 6 - idx, // reverse so idx 0 -> string 6
+      fret: targetSemitone - openSemitone
+    };
+  }).filter(pos => pos.fret >= 0);
+
+  const best = positions.reduce((acc, cur) => {
+    if (!acc) return cur;
+    if (cur.fret < acc.fret) return cur;
+    if (cur.fret === acc.fret && cur.stringNumber < acc.stringNumber) return cur;
+    return acc;
+  }, null as (typeof positions)[number] | null);
+
+  if (!best) {
+    return { stringNumber: 0, fret: -1, label: "(out of range)" };
+  }
+
+  return {
+    ...best,
+    label: `String ${best.stringNumber}, fret ${best.fret}`
+  };
+}
 
 function generateMelodyForProgression(
   key: string,
@@ -171,10 +225,12 @@ function generateMelodyForProgression(
       }
 
       const duration = 1; // quarter notes for now
+      const tab = convertNoteToTab(pitch);
       notes.push({
         note: pitch,
         duration,
-        beat: currentBeat
+        beat: currentBeat,
+        tab
       });
 
       currentBeat += duration;
@@ -289,6 +345,8 @@ function renderHomePage(): Response {
         margin-bottom: 10px;
         background: rgba(255, 255, 255, 0.02);
       }
+      .progression-item { cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+      .progression-item:hover { border-color: #4f5fa3; background: rgba(124, 111, 255, 0.05); }
       .progression-item h3 { margin: 0 0 6px; font-size: 16px; }
       .muted { color: var(--muted); }
       code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; }
@@ -331,6 +389,9 @@ function renderHomePage(): Response {
             <option value="minor">Minor</option>
           </select>
 
+          <label for="progression-capo">Capo (semitones)</label>
+          <input id="progression-capo" name="capo" type="number" min="0" max="11" value="0" />
+
           <button type="submit">Get Progressions</button>
         </form>
         <div id="progression-results" class="results muted">Results will appear here.</div>
@@ -369,6 +430,7 @@ function renderHomePage(): Response {
           <div>
             <div><strong>Progressions:</strong> <code>/api/progressions?key=C&scale=major</code></div>
             <div><strong>Melody:</strong> POST <code>/api/melody</code> with <code>{"key":"C","scale":"major","progression":["C","G","Am","F"]}</code></div>
+            <div style="margin-top: 6px;"><strong>Extras:</strong> Add <code>&capo=2</code> to transpose progressions; melodies now include guitar tab positions.</div>
           </div>
         </div>
       </section>
@@ -379,6 +441,7 @@ function renderHomePage(): Response {
       const melodyForm = document.getElementById('melody-form');
       const progressionResults = document.getElementById('progression-results');
       const melodyResults = document.getElementById('melody-results');
+      const progressionCapoInput = document.getElementById('progression-capo');
 
       const setLoading = (el, isLoading) => {
         if (!el) return;
@@ -387,17 +450,42 @@ function renderHomePage(): Response {
         }
       };
 
+      const applyProgressionToMelody = (progression, key, scale) => {
+        const input = document.getElementById('melody-progression');
+        const keyInput = document.getElementById('melody-key');
+        const scaleSelect = document.getElementById('melody-scale');
+
+        if (input && 'value' in input) input.value = progression;
+        if (key && keyInput && 'value' in keyInput) keyInput.value = key;
+        if (scale && scaleSelect && 'value' in scaleSelect) scaleSelect.value = scale;
+      };
+
+      const wireProgressionSelection = () => {
+        progressionResults?.querySelectorAll('.progression-item').forEach((item) => {
+          item.addEventListener('click', () => {
+            const progression = item.getAttribute('data-progression');
+            const key = item.getAttribute('data-key');
+            const scale = item.getAttribute('data-scale');
+            if (progression) {
+              applyProgressionToMelody(progression, key || '', scale || '');
+            }
+          });
+        });
+      };
+
       progressionForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const keyInput = document.getElementById('progression-key');
         const scaleSelect = document.getElementById('progression-scale');
+        const capoInput = progressionCapoInput && 'value' in progressionCapoInput ? progressionCapoInput.value : '0';
         const key = keyInput && 'value' in keyInput ? keyInput.value : 'C';
         const scale = scaleSelect && 'value' in scaleSelect ? scaleSelect.value : 'major';
+        const capo = parseInt(capoInput || '0', 10) || 0;
 
         setLoading(progressionResults, true);
 
         try {
-          const res = await fetch('/api/progressions?key=' + encodeURIComponent(key) + '&scale=' + encodeURIComponent(scale));
+          const res = await fetch('/api/progressions?key=' + encodeURIComponent(key) + '&scale=' + encodeURIComponent(scale) + '&capo=' + capo);
           const data = await res.json();
 
           if (!data.progressions) {
@@ -406,16 +494,19 @@ function renderHomePage(): Response {
           }
 
           const items = data.progressions.map((p) => {
-            const chordNames = p.chords.map((c) => c.name).join(' · ');
+            const chordNames = p.chords.map((c) => c.name);
             const degrees = p.degrees.join(' - ');
-            return '<div class="progression-item">'
+            return '<div class="progression-item" data-progression="' + chordNames.join(',') + '" data-key="' + (data.capoKey || data.key) + '" data-scale="' + data.scaleType + '">' 
               + '<h3>' + p.label + '</h3>'
               + '<div class="muted">Degrees: ' + degrees + '</div>'
-              + '<div><strong>Chords:</strong> ' + chordNames + '</div>'
+              + '<div><strong>Chords:</strong> ' + chordNames.join(' · ') + '</div>'
+              + '<div class="muted">Click to send to melody</div>'
               + '</div>';
           }).join('');
 
-          progressionResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Key: ' + data.key + ' · Scale: ' + data.scaleType + '</div>' + items;
+          const capoDetail = data.capo ? ' · Capo: ' + data.capo + ' (new key: ' + data.capoKey + ')' : '';
+          progressionResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Key: ' + data.key + ' · Scale: ' + data.scaleType + capoDetail + '</div>' + items;
+          wireProgressionSelection();
         } catch (err) {
           progressionResults.innerHTML = '<span class="muted">Something went wrong loading progressions.</span>';
         }
@@ -448,6 +539,7 @@ function renderHomePage(): Response {
 
           const items = data.melody.map((n) => '<div class="melody-item">'
               + '<strong>' + n.note + '</strong> — ' + n.duration + ' beat' + (n.duration !== 1 ? 's' : '') + ' at beat ' + n.beat
+              + '<div class="muted">Tab: ' + (n.tab?.label || '—') + '</div>'
             + '</div>').join('');
 
           melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + items;
@@ -484,8 +576,10 @@ export default {
         const key = url.searchParams.get("key") || "C";
         const scaleParam = (url.searchParams.get("scale") || "major").toLowerCase();
         const scaleType: ScaleType = scaleParam === "minor" ? "minor" : "major";
+        const capoParam = parseInt(url.searchParams.get("capo") || "0", 10);
+        const capo = Number.isFinite(capoParam) ? Math.max(0, Math.min(11, capoParam)) : 0;
 
-        const data = generateChordProgressions(key, scaleType);
+        const data = generateChordProgressions(key, scaleType, capo);
         return jsonResponse(data);
       }
 
