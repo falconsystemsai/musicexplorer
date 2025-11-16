@@ -306,7 +306,8 @@ function renderHomePage(): Response {
       }
 
       .card.card-wide {
-        grid-column: span 2;
+        grid-column: 1 / -1;
+        overflow-x: auto;
       }
 
       .card h2 { margin: 0 0 10px; font-size: 20px; }
@@ -373,6 +374,7 @@ function renderHomePage(): Response {
         border-radius: 12px;
         padding: 12px;
         background: linear-gradient(135deg, rgba(124, 111, 255, 0.06), rgba(255, 255, 255, 0));
+        min-width: 1200px;
       }
       .fret-labels {
         display: grid;
@@ -461,6 +463,21 @@ function renderHomePage(): Response {
         font-size: 14px;
       }
 
+      .playback-controls {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .playback-controls .tempo-field {
+        min-width: 180px;
+        flex: 1;
+      }
+      .playback-controls label {
+        margin-bottom: 4px;
+      }
+
       @media (max-width: 640px) {
         h1 { font-size: 28px; }
         header { padding-top: 32px; }
@@ -518,6 +535,13 @@ function renderHomePage(): Response {
           <button type="button" data-progression="Am,F,C,G" class="progression-fill">vi–IV–I–V</button>
           <button type="button" data-progression="Dm,G,C,F" class="progression-fill">ii–V–I–IV</button>
         </div>
+        <div class="playback-controls">
+          <div class="tempo-field">
+            <label for="melody-tempo">Tempo (BPM)</label>
+            <input id="melody-tempo" name="melody-tempo" type="number" min="50" max="180" value="96" />
+          </div>
+          <button type="button" id="play-melody" disabled>Play melody</button>
+        </div>
         <div id="melody-results" class="results muted">Melody notes will appear here.</div>
       </section>
 
@@ -547,11 +571,94 @@ function renderHomePage(): Response {
       const melodyResults = document.getElementById('melody-results');
       const fretboardArea = document.getElementById('fretboard-area');
       const progressionCapoInput = document.getElementById('progression-capo');
+      const playButton = document.getElementById('play-melody');
+      const tempoInput = document.getElementById('melody-tempo');
+
+      const CHROMATIC = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+      const noteToMidi = (note) => {
+        const match = /^([A-G]#?)(\d)$/.exec(note || '');
+        if (!match) return null;
+        const pitchIndex = CHROMATIC.indexOf(match[1]);
+        if (pitchIndex === -1) return null;
+        const octave = parseInt(match[2], 10);
+        return octave * 12 + pitchIndex;
+      };
+
+      const midiToFrequency = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+
+      let activeAudioContext = null;
+      let stopActiveNotes = [];
+
+      const ensureAudioContext = () => {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return null;
+        if (activeAudioContext) return activeAudioContext;
+        activeAudioContext = new AudioContextClass();
+        return activeAudioContext;
+      };
+
+      const playMelodyAudio = async (melody, tempo) => {
+        if (!melody || !melody.length) return;
+
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
+
+        stopActiveNotes.forEach((stop) => stop());
+        stopActiveNotes = [];
+
+        if (ctx.state === 'suspended') {
+          try {
+            await ctx.resume();
+          } catch (err) {
+            return;
+          }
+        }
+
+        const bpm = Number.isFinite(tempo) ? Math.max(40, Math.min(180, tempo)) : 96;
+        const secondsPerBeat = 60 / bpm;
+        const startAt = ctx.currentTime + 0.1;
+
+        melody.forEach((note) => {
+          const midi = noteToMidi(note.note);
+          if (midi == null) return;
+
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.value = midiToFrequency(midi);
+
+          const noteStart = startAt + (note.beat || 0) * secondsPerBeat;
+          const noteDuration = (note.duration || 1) * secondsPerBeat;
+          const noteEnd = noteStart + noteDuration;
+
+          gain.gain.setValueAtTime(0.0001, noteStart);
+          gain.gain.exponentialRampToValueAtTime(0.6, noteStart + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(noteStart);
+          osc.stop(noteEnd + 0.05);
+          stopActiveNotes.push(() => {
+            try { osc.stop(); } catch (_) { /* already stopped */ }
+          });
+        });
+      };
+
+      let latestMelody = [];
 
       const setLoading = (el, isLoading) => {
         if (!el) return;
         if (isLoading) {
           el.innerHTML = '<span class="muted">Loading...</span>';
+        }
+      };
+
+      const setPlaybackReady = (melody) => {
+        latestMelody = Array.isArray(melody) ? melody : [];
+        if (playButton) {
+          playButton.disabled = latestMelody.length === 0;
         }
       };
 
@@ -689,6 +796,7 @@ function renderHomePage(): Response {
 
         setLoading(melodyResults, true);
         setLoading(fretboardArea, true);
+        setPlaybackReady([]);
 
         try {
           const res = await fetch('/api/melody', {
@@ -708,24 +816,31 @@ function renderHomePage(): Response {
               + '<div class="muted">Tab: ' + (n.tab?.label || '—') + '</div>'
             + '</div>').join('');
 
-          const fretboard = buildFretboardDiagram(data.melody);
-          const tabSteps = buildTabLegend(data.melody);
+            const fretboard = buildFretboardDiagram(data.melody);
+            const tabSteps = buildTabLegend(data.melody);
 
-          melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + tabSteps + items;
-          fretboardArea.innerHTML = fretboard || '<span class="muted">No playable fretboard positions found.</span>';
-        } catch (err) {
-          melodyResults.innerHTML = '<span class="muted">Failed to load melody.</span>';
-          fretboardArea.innerHTML = '<span class="muted">Failed to load fretboard diagram.</span>';
-        }
-      });
-
-      document.querySelectorAll('.progression-fill').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const value = btn.dataset.progression;
-          const input = document.getElementById('melody-progression');
-          if (value && input && 'value' in input) input.value = value;
+            melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + tabSteps + items;
+            fretboardArea.innerHTML = fretboard || '<span class="muted">No playable fretboard positions found.</span>';
+            setPlaybackReady(data.melody);
+          } catch (err) {
+            melodyResults.innerHTML = '<span class="muted">Failed to load melody.</span>';
+            fretboardArea.innerHTML = '<span class="muted">Failed to load fretboard diagram.</span>';
+            setPlaybackReady([]);
+          }
         });
-      });
+
+        playButton?.addEventListener('click', async () => {
+          const tempoValue = tempoInput && 'value' in tempoInput ? parseInt(tempoInput.value, 10) : 96;
+          await playMelodyAudio(latestMelody, tempoValue);
+        });
+
+        document.querySelectorAll('.progression-fill').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const value = btn.dataset.progression;
+            const input = document.getElementById('melody-progression');
+            if (value && input && 'value' in input) input.value = value;
+          });
+        });
     </script>
   </body>
   </html>`;
