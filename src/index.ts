@@ -305,6 +305,10 @@ function renderHomePage(): Response {
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
       }
 
+      .card.card-wide {
+        grid-column: span 2;
+      }
+
       .card h2 { margin: 0 0 10px; font-size: 20px; }
       .card p { margin: 0 0 16px; color: var(--muted); }
 
@@ -517,7 +521,7 @@ function renderHomePage(): Response {
         <div id="melody-results" class="results muted">Melody notes will appear here.</div>
       </section>
 
-      <section class="card">
+      <section class="card card-wide">
         <h2>Guitar Fretboard</h2>
         <p class="muted">Visualize where each melody note sits on the neck.</p>
         <div id="fretboard-area" class="results muted">Play a melody to see fret positions.</div>
