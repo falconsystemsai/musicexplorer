@@ -307,6 +307,7 @@ function renderHomePage(): Response {
 
       .card.card-wide {
         grid-column: 1 / -1;
+        overflow-x: auto;
       }
 
       .card h2 { margin: 0 0 10px; font-size: 20px; }
@@ -373,6 +374,7 @@ function renderHomePage(): Response {
         border-radius: 12px;
         padding: 12px;
         background: linear-gradient(135deg, rgba(124, 111, 255, 0.06), rgba(255, 255, 255, 0));
+        min-width: 1200px;
       }
       .fret-labels {
         display: grid;
@@ -586,56 +588,62 @@ function renderHomePage(): Response {
       const midiToFrequency = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
 
       let activeAudioContext = null;
+      let stopActiveNotes = [];
 
-      const playMelodyAudio = (melody, tempo) => {
+      const ensureAudioContext = () => {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return null;
+        if (activeAudioContext) return activeAudioContext;
+        activeAudioContext = new AudioContextClass();
+        return activeAudioContext;
+      };
+
+      const playMelodyAudio = async (melody, tempo) => {
         if (!melody || !melody.length) return;
 
-        if (activeAudioContext) {
-          activeAudioContext.close();
-        }
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
 
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioContextClass();
-        activeAudioContext = ctx;
-
-        const schedulePlayback = () => {
-          const bpm = Number.isFinite(tempo) ? Math.max(40, Math.min(180, tempo)) : 96;
-          const secondsPerBeat = 60 / bpm;
-          const startAt = ctx.currentTime + 0.1;
-
-          melody.forEach((note) => {
-            const midi = noteToMidi(note.note);
-            if (midi == null) return;
-
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-
-            osc.type = 'sine';
-            osc.frequency.value = midiToFrequency(midi);
-
-            const noteStart = startAt + (note.beat || 0) * secondsPerBeat;
-            const noteDuration = (note.duration || 1) * secondsPerBeat;
-            const noteEnd = noteStart + noteDuration;
-
-            gain.gain.setValueAtTime(0.0001, noteStart);
-            gain.gain.exponentialRampToValueAtTime(0.6, noteStart + 0.02);
-            gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
-
-            osc.connect(gain).connect(ctx.destination);
-            osc.start(noteStart);
-            osc.stop(noteEnd + 0.05);
-          });
-        };
+        stopActiveNotes.forEach((stop) => stop());
+        stopActiveNotes = [];
 
         if (ctx.state === 'suspended') {
-          ctx.resume().then(schedulePlayback).catch(() => {
-            // If we can't resume, bail early so the user isn't stuck with a silent play button.
-            activeAudioContext = null;
-          });
-          return;
+          try {
+            await ctx.resume();
+          } catch (err) {
+            return;
+          }
         }
 
-        schedulePlayback();
+        const bpm = Number.isFinite(tempo) ? Math.max(40, Math.min(180, tempo)) : 96;
+        const secondsPerBeat = 60 / bpm;
+        const startAt = ctx.currentTime + 0.1;
+
+        melody.forEach((note) => {
+          const midi = noteToMidi(note.note);
+          if (midi == null) return;
+
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.value = midiToFrequency(midi);
+
+          const noteStart = startAt + (note.beat || 0) * secondsPerBeat;
+          const noteDuration = (note.duration || 1) * secondsPerBeat;
+          const noteEnd = noteStart + noteDuration;
+
+          gain.gain.setValueAtTime(0.0001, noteStart);
+          gain.gain.exponentialRampToValueAtTime(0.6, noteStart + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(noteStart);
+          osc.stop(noteEnd + 0.05);
+          stopActiveNotes.push(() => {
+            try { osc.stop(); } catch (_) { /* already stopped */ }
+          });
+        });
       };
 
       let latestMelody = [];
@@ -821,9 +829,9 @@ function renderHomePage(): Response {
           }
         });
 
-        playButton?.addEventListener('click', () => {
+        playButton?.addEventListener('click', async () => {
           const tempoValue = tempoInput && 'value' in tempoInput ? parseInt(tempoInput.value, 10) : 96;
-          playMelodyAudio(latestMelody, tempoValue);
+          await playMelodyAudio(latestMelody, tempoValue);
         });
 
         document.querySelectorAll('.progression-fill').forEach((btn) => {
