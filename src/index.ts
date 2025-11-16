@@ -351,6 +351,100 @@ function renderHomePage(): Response {
       .muted { color: var(--muted); }
       code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; }
 
+      .tab-section {
+        margin-top: 16px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .tab-section h3 {
+        margin: 0 0 10px;
+        font-size: 15px;
+        letter-spacing: 0.01em;
+      }
+
+      .fretboard {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        background: linear-gradient(135deg, rgba(124, 111, 255, 0.06), rgba(255, 255, 255, 0));
+      }
+      .fret-labels {
+        display: grid;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 8px;
+        opacity: 0.8;
+      }
+      .string-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .string-row:last-child { margin-bottom: 0; }
+      .string-name {
+        width: 70px;
+        text-align: right;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.02em;
+      }
+      .string-line {
+        position: relative;
+        flex: 1;
+        height: 30px;
+        border-top: 2px solid rgba(255, 255, 255, 0.14);
+        border-radius: 10px;
+        background: repeating-linear-gradient(
+          to right,
+          transparent 0,
+          transparent calc((100% / var(--fret-count)) - 1px),
+          rgba(255, 255, 255, 0.05) calc((100% / var(--fret-count)) - 1px),
+          rgba(255, 255, 255, 0.05) calc(100% / var(--fret-count))
+        );
+      }
+      .fret-marker {
+        position: absolute;
+        top: -9px;
+        transform: translateX(-50%);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .marker-order {
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, #f5f0ff, #9c7bff);
+        color: #0b1021;
+        font-weight: 800;
+        font-size: 12px;
+        box-shadow: 0 0 0 2px rgba(123, 108, 255, 0.35);
+      }
+      .marker-note {
+        font-size: 12px;
+        color: var(--text);
+        padding: 4px 8px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid var(--border);
+      }
+      .tab-legend {
+        margin: 10px 0 0;
+        padding-left: 18px;
+        color: var(--text);
+      }
+      .tab-legend li { margin-bottom: 6px; }
+      .tab-legend .muted { color: var(--muted); }
+
       .api-hint {
         display: inline-flex;
         align-items: center;
@@ -450,6 +544,67 @@ function renderHomePage(): Response {
         }
       };
 
+      const buildTabLegend = (melody) => {
+        const playable = (melody || []).map((n, idx) => ({
+          order: idx + 1,
+          note: n.note,
+          tab: n.tab
+        })).filter((n) => n.tab && n.tab.stringNumber > 0 && n.tab.fret >= 0);
+
+        if (!playable.length) return '';
+
+        const steps = playable.map((p) => '<li>'
+          + '<strong>' + p.order + '.</strong> String ' + p.tab.stringNumber + ', fret ' + p.tab.fret
+          + ' <span class="muted">(' + p.note + ')</span>'
+          + '</li>').join('');
+
+        return '<div class="tab-section">'
+          + '<h3>Step-by-step tab</h3>'
+          + '<ol class="tab-legend">' + steps + '</ol>'
+          + '</div>';
+      };
+
+      const buildFretboardDiagram = (melody) => {
+        const playable = (melody || []).map((n, idx) => ({
+          order: idx + 1,
+          note: n.note,
+          tab: n.tab
+        })).filter((n) => n.tab && n.tab.stringNumber > 0 && n.tab.fret >= 0);
+
+        if (!playable.length) return '';
+
+        const strings = [6, 5, 4, 3, 2, 1];
+        const maxFret = Math.max(...playable.map((p) => p.tab.fret));
+        const fretCount = Math.max(5, Math.min(14, maxFret + 3));
+
+        const fretLabels = Array.from({ length: fretCount + 1 }, (_, i) => '<div>' + i + '</div>').join('');
+
+        const rows = strings.map((stringNumber) => {
+          const markers = playable
+            .filter((p) => p.tab.stringNumber === stringNumber)
+            .map((p) => {
+              const left = Math.min(98, (p.tab.fret / fretCount) * 100);
+              return '<div class="fret-marker" style="left:' + left + '%">'
+                + '<span class="marker-order">' + p.order + '</span>'
+                + '<span class="marker-note">fret ' + p.tab.fret + ' · ' + p.note + '</span>'
+                + '</div>';
+            }).join('');
+
+          return '<div class="string-row">'
+            + '<div class="string-name">String ' + stringNumber + '</div>'
+            + '<div class="string-line" style="--fret-count:' + fretCount + ';">' + markers + '</div>'
+            + '</div>';
+        }).join('');
+
+        return '<div class="tab-section">'
+          + '<h3>Guitar fretboard</h3>'
+          + '<div class="fretboard">'
+            + '<div class="fret-labels" style="grid-template-columns: repeat(' + (fretCount + 1) + ', 1fr);">' + fretLabels + '</div>'
+            + rows
+          + '</div>'
+          + '</div>';
+      };
+
       const applyProgressionToMelody = (progression, key, scale) => {
         const input = document.getElementById('melody-progression');
         const keyInput = document.getElementById('melody-key');
@@ -542,7 +697,10 @@ function renderHomePage(): Response {
               + '<div class="muted">Tab: ' + (n.tab?.label || '—') + '</div>'
             + '</div>').join('');
 
-          melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + items;
+          const fretboard = buildFretboardDiagram(data.melody);
+          const tabSteps = buildTabLegend(data.melody);
+
+          melodyResults.innerHTML = '<div class="muted" style="margin-bottom: 8px;">Progression: ' + data.progression.join(' · ') + '</div>' + fretboard + tabSteps + items;
         } catch (err) {
           melodyResults.innerHTML = '<span class="muted">Failed to load melody.</span>';
         }
