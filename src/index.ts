@@ -598,32 +598,44 @@ function renderHomePage(): Response {
         const ctx = new AudioContextClass();
         activeAudioContext = ctx;
 
-        const bpm = Number.isFinite(tempo) ? Math.max(40, Math.min(180, tempo)) : 96;
-        const secondsPerBeat = 60 / bpm;
-        const startAt = ctx.currentTime + 0.1;
+        const schedulePlayback = () => {
+          const bpm = Number.isFinite(tempo) ? Math.max(40, Math.min(180, tempo)) : 96;
+          const secondsPerBeat = 60 / bpm;
+          const startAt = ctx.currentTime + 0.1;
 
-        melody.forEach((note) => {
-          const midi = noteToMidi(note.note);
-          if (midi == null) return;
+          melody.forEach((note) => {
+            const midi = noteToMidi(note.note);
+            if (midi == null) return;
 
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
 
-          osc.type = 'sine';
-          osc.frequency.value = midiToFrequency(midi);
+            osc.type = 'sine';
+            osc.frequency.value = midiToFrequency(midi);
 
-          const noteStart = startAt + (note.beat || 0) * secondsPerBeat;
-          const noteDuration = (note.duration || 1) * secondsPerBeat;
-          const noteEnd = noteStart + noteDuration;
+            const noteStart = startAt + (note.beat || 0) * secondsPerBeat;
+            const noteDuration = (note.duration || 1) * secondsPerBeat;
+            const noteEnd = noteStart + noteDuration;
 
-          gain.gain.setValueAtTime(0.0001, noteStart);
-          gain.gain.exponentialRampToValueAtTime(0.6, noteStart + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+            gain.gain.setValueAtTime(0.0001, noteStart);
+            gain.gain.exponentialRampToValueAtTime(0.6, noteStart + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
 
-          osc.connect(gain).connect(ctx.destination);
-          osc.start(noteStart);
-          osc.stop(noteEnd + 0.05);
-        });
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(noteStart);
+            osc.stop(noteEnd + 0.05);
+          });
+        };
+
+        if (ctx.state === 'suspended') {
+          ctx.resume().then(schedulePlayback).catch(() => {
+            // If we can't resume, bail early so the user isn't stuck with a silent play button.
+            activeAudioContext = null;
+          });
+          return;
+        }
+
+        schedulePlayback();
       };
 
       let latestMelody = [];
